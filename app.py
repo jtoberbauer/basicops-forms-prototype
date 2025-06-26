@@ -109,7 +109,8 @@ if code_param and not token_valid():
     if token_resp.ok:
         save_tokens(token_resp.json())
         # Clean URL (remove ?code)
-        st.experimental_set_query_params()
+        st.markdown('<meta http-equiv="refresh" content="0;url=/" />', unsafe_allow_html=True)
+        st.stop()
     else:
         st.error("OAuth token exchange failed.")
 
