@@ -34,7 +34,6 @@ st.set_page_config(page_title="BasicOps Forms", layout="centered")
 st.title("📝 BasicOps Task Form (OAuth)")
 
 # ── HANDLE OAUTH REDIRECT ──────────────────────────────
-# Only run this once, the first time ?code=… appears
 if "code" in st.query_params and "access_token" not in st.session_state:
     code = st.query_params["code"]
 
@@ -52,13 +51,15 @@ if "code" in st.query_params and "access_token" not in st.session_state:
 
     if token_resp.status_code == 200:
         tok = token_resp.json()["access_token"]
-        st.session_state["access_token"] = tok        # ⬅️  save in session
-        st.experimental_set_query_params()            # ⬅️  strip ?code=… safely
-        st.experimental_rerun()                       # ⬅️  soft reload, state intact
+        st.session_state["access_token"] = tok
+
+        # ✨ clear ?code=… from the URL, then soft-rerun
+        st.query_params.clear()      # <-- new API, not deprecated
+        st.experimental_rerun()
     else:
         st.error(f"OAuth failed: {token_resp.text}")
         st.stop()
-        
+
 # ── SESSION HELPERS ──────────────────────────────────────────────────────────
 
 def save_tokens(tok_json: dict):
