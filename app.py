@@ -36,9 +36,8 @@ st.title("📝 BasicOps Task Form (OAuth)")
 # Handle OAuth redirect back with ?code=...
 if "code" in st.query_params:
     code = st.query_params["code"]
-    st.write("OAuth code received:", code)  # 👈 Debug line
+    st.write("OAuth code received:", code)
 
-    # Exchange code for access token
     token_response = requests.post(
         "https://api.basicops.com/oauth/token",
         data={
@@ -50,17 +49,17 @@ if "code" in st.query_params:
         },
     )
 
-    st.write("Token response:", token_response.status_code, token_response.text)  # 👈 Debug line
+    st.write("Token response:", token_response.status_code, token_response.text)
 
- if token_response.status_code == 200:
-    token_data = token_response.json()
-    st.session_state["access_token"] = token_data["access_token"]
+    if token_response.status_code == 200:
+        token_data = token_response.json()
+        st.session_state["access_token"] = token_data["access_token"]
 
-    # ✅ strip ?code=... from the URL, then stop
-    st.markdown('<meta http-equiv="refresh" content="0;url=/">', unsafe_allow_html=True)
-    st.stop()
-else:
-    st.error("Failed to authenticate with BasicOps.")
+        # Strip the ?code= param by refreshing clean
+        st.markdown('<meta http-equiv="refresh" content="0;url=/">', unsafe_allow_html=True)
+        st.stop()
+    else:
+        st.error("Failed to authenticate with BasicOps.")
 
 
 # ── SESSION HELPERS ──────────────────────────────────────────────────────────
