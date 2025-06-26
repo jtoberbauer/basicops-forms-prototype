@@ -1,100 +1,138 @@
 import streamlit as st
-import requests
-import time
+import requests, time, json
 
-# ── SECRETS ────────────────────────────────────────────────────────────────────
-CLIENT_ID = st.secrets["basicops_client_id"]
-CLIENT_SECRET = st.secrets["basicops_client_secret"]
+"""
+BasicOps Forms Prototype – FINAL FIX
+-----------------------------------
+• Uses correct endpoints: /v1/project + /v1/task
+• Robust token save / refresh
+• Detailed error surfacing
+"""
+
+# ── CONFIG ───────────────────────────────────────────────
+API_BASE     = "https://api.basicops.com/v1"
+AUTH_URL     = "https://app.basicops.com/oauth/auth"
+TOKEN_URL    = "https://api.basicops.com/oauth/token"
+CLIENT_ID    = st.secrets["basicops_client_id"]
+CLIENT_SEC   = st.secrets["basicops_client_secret"]
 REDIRECT_URI = st.secrets["basicops_redirect_uri"]
-BASE_URL = "https://api.basicops.com/v1"
 
-# ── FUNCTIONS ──────────────────────────────────────────────────────────────────
+# ── PAGE SETUP ───────────────────────────────────────────
+st.set_page_config("BasicOps Forms", layout="centered")
+st.title("📝 BasicOps Task Form (OAuth)")
 
-def exchange_code_for_token(code):
-    token_resp = requests.post(
-        "https://api.basicops.com/oauth/token",
-        data={
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "redirect_uri": REDIRECT_URI,
-            "grant_type": "authorization_code",
-            "code": code,
-        },
-        timeout=15,
-    )
+# ── SESSION HELPERS ─────────────────────────────────────
 
-    if token_resp.status_code == 200:
-        tok_data = token_resp.json()
-        st.session_state["access_token"] = tok_data["access_token"]
-        st.session_state["refresh_token"] = tok_data["refresh_token"]
-        st.session_state["expires_at"] = time.time() + tok_data.get("expires_in", 3600)
-        st.experimental_rerun()
-    else:
-        st.error("Failed to exchange token.")
+def save_tokens(tok: dict):
+    st.session_state["access_token"]  = tok["access_token"]
+    st.session_state["refresh_token"] = tok.get("refresh_token")
+    st.session_state["expires_at"]    = time.time() + tok.get("expires_in", 3600) - 60  # 1‑min headroom
+
+def token_valid() -> bool:
+    return "access_token" in st.session_state and time.time() < st.session_state.get("expires_at", 0)
+
+def refresh_token() -> bool:
+    if "refresh_token" not in st.session_state:
+        return False
+    r = requests.post(TOKEN_URL, data={
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SEC,
+        "redirect_uri": REDIRECT_URI,
+        "grant_type": "refresh_token",
+        "refresh_token": st.session_state["refresh_token"],
+    }, timeout=10)
+    if r.ok:
+        save_tokens(r.json())
+        return True
+    return False
+
+# ── MINI WRAPPERS ───────────────────────────────────────
+
+def ensure_token():
+    if not token_valid() and not refresh_token():
+        st.warning("Please connect to BasicOps again.")
         st.stop()
 
-def token_valid():
-    return (
-        "access_token" in st.session_state
-        and time.time() < st.session_state["expires_at"]
-    )
 
-def api_get(path):
-    res = requests.get(
-        BASE_URL + path,
-        headers={"Authorization": f"Bearer {st.session_state['access_token']}"},
-        timeout=15,
-    )
-    if not res.ok:
-        st.error(f"API error {res.status_code}")
+def api_get(path: str):
+    ensure_token()
+    url = f"{API_BASE}{path}"
+    r = requests.get(url, headers={"Authorization": f"Bearer {st.session_state['access_token']}"}, timeout=10)
+    if not r.ok:
+        st.error(f"GET {path} → {r.status_code}\n{r.text[:300]}")
         st.stop()
-    return res.json()
+    try:
+        return r.json()
+    except Exception:
+        st.error("Response was not JSON (see below)")
+        st.write(r.text[:1000])
+        st.stop()
 
-def api_post(path, payload):
-    res = requests.post(
-        BASE_URL + path,
+
+def api_post(path: str, payload: dict):
+    ensure_token()
+    r = requests.post(
+        f"{API_BASE}{path}",
         headers={
             "Authorization": f"Bearer {st.session_state['access_token']}",
             "Content-Type": "application/json",
         },
-        json=payload,
-        timeout=15,
+        data=json.dumps(payload),
+        timeout=10,
     )
-    if not res.ok:
-        st.error(f"Post failed {res.status_code}: {res.text}")
+    if not r.ok:
+        st.error(f"POST {path} → {r.status_code}\n{r.text[:300]}")
         st.stop()
-    return res.json()
+    return r.json()
 
-# ── MAIN ───────────────────────────────────────────────────────────────────────
+# ── HANDLE ?code= ───────────────────────────────────────
+if "code" in st.query_params and "access_token" not in st.session_state:
+    code = st.query_params["code"]
+    r = requests.post(TOKEN_URL, data={
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SEC,
+        "redirect_uri": REDIRECT_URI,
+        "grant_type": "authorization_code",
+        "code": code,
+    }, timeout=10)
+    if r.ok and r.json().get("access_token"):
+        save_tokens(r.json())
+        st.query_params.clear()
+        st.rerun()
+    else:
+        st.error(f"Token exchange failed: {r.status_code}\n{r.text}")
+        st.stop()
 
-st.title("📝 BasicOps Task Form (OAuth)")
-
-query_params = st.query_params
-if "code" in query_params and not token_valid():
-    code = query_params["code"]
-    st.write(f"OAuth code received: {code}")
-    exchange_code_for_token(code)
-
+# ── LOGIN BUTTON ────────────────────────────────────────
 if not token_valid():
-    auth_url = (
-        "https://app.basicops.com/oauth/auth?"
-        f"client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
-    )
-    st.markdown(f"🔑 [Connect to BasicOps]({auth_url})")
+    params = f"client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
+    st.markdown(f"[🔑 Connect to BasicOps]({AUTH_URL}?{params})", unsafe_allow_html=True)
     st.stop()
 
-projects = api_get("/projects?limit=100").get("items", [])
-proj_map = {p["name"]: p["id"] for p in projects}
+st.success("Connected to BasicOps ✅")
 
+# ── PROJECT PICKER ──────────────────────────────────────
+proj_resp = api_get("/project?limit=100")
+projects  = proj_resp.get("data", [])
+if not projects:
+    st.error("No projects returned. Check API scopes.")
+    st.stop()
+
+proj_map = {p["title"]: p["id"] for p in projects}
 sel_name = st.selectbox("Select a Project", list(proj_map.keys()))
-task_title = st.text_input("Task Title")
-task_notes = st.text_area("Task Notes")
+proj_id  = proj_map[sel_name]
 
-if st.button("Create Task"):
-    payload = {
-        "title": task_title,
-        "notes": task_notes,
-        "project_id": proj_map[sel_name],
-    }
-    res = api_post("/task", payload)
-    st.success(f"Task created! ID: {res['id']}")
+# ── FORM ───────────────────────────────────────────────
+with st.form("new_task"):
+    task_title = st.text_input("Task title")
+    task_notes = st.text_area("Notes")
+    submitted  = st.form_submit_button("Create Task")
+
+if submitted:
+    new = api_post("/task", {
+        "title": task_title or "Untitled Task",
+        "description": task_notes,
+        "project": proj_id,
+    })
+    st.success(f"Task created: ID {new['data']['id']}")
+    st.balloons()
