@@ -49,8 +49,8 @@ if "code" in st.query_params and "access_token" not in st.session_state:
         timeout=15,
     )
 
-    if token_response.status_code == 200:
-       token_data = token_response.json()
+    if token_resp.status_code == 200:
+       token_data = token_resp.json()
        st.session_state["access_token"]  = token_data["access_token"]
        st.session_state["refresh_token"] = token_data.get("refresh_token")
        st.session_state["expires_at"]    = time.time() + token_data.get("expires_in", 3600) - 60
