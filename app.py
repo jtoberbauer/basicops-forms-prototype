@@ -33,13 +33,13 @@ SCOPE      = "read write"
 st.set_page_config(page_title="BasicOps Forms", layout="centered")
 st.title("📝 BasicOps Task Form (OAuth)")
 
-# Handle OAuth redirect back with ?code=...
-if "code" in st.query_params:
+# ── HANDLE OAUTH REDIRECT ──────────────────────────────
+# Only run this once, the first time ?code=… appears
+if "code" in st.query_params and "access_token" not in st.session_state:
     code = st.query_params["code"]
-    st.write("OAuth code received:", code)
 
-    token_response = requests.post(
-        "https://api.basicops.com/oauth/token",
+    token_resp = requests.post(
+        TOKEN_URL,
         data={
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,
@@ -47,22 +47,18 @@ if "code" in st.query_params:
             "grant_type": "authorization_code",
             "code": code,
         },
+        timeout=15,
     )
 
-    st.write("Token response:", token_response.status_code, token_response.text)
-
-    if token_response.status_code == 200:
-        token_data = token_response.json()
-        st.session_state["access_token"] = token_data["access_token"]
-
-        # Strip the ?code= param by refreshing clean
-        token = token_data["access_token"]
-        st.markdown(f'<meta http-equiv="refresh" content="0;url=/?token={token}">', unsafe_allow_html=True)
-        st.stop()
+    if token_resp.status_code == 200:
+        tok = token_resp.json()["access_token"]
+        st.session_state["access_token"] = tok        # ⬅️  save in session
+        st.experimental_set_query_params()            # ⬅️  strip ?code=… safely
+        st.experimental_rerun()                       # ⬅️  soft reload, state intact
     else:
-        st.error("Failed to authenticate with BasicOps.")
-
-
+        st.error(f"OAuth failed: {token_resp.text}")
+        st.stop()
+        
 # ── SESSION HELPERS ──────────────────────────────────────────────────────────
 
 def save_tokens(tok_json: dict):
