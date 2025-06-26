@@ -2,13 +2,11 @@ import streamlit as st
 import requests, time, json, datetime
 
 """
-BasicOps Forms – **++FULL DEBUG VERSION**
---------------------------------------
-Adds granular diagnostics so you can see exactly where things break:
-• Prints token‑exchange status & body
-• Logs every API request URL + status + first 300 chars of response
-• Shows raw project list & field schema
-Delete `st.write` lines once it’s stable.
+BasicOps Forms – **FULL DEBUG VERSION** (fixed response shapes)
+--------------------------------------------------------------
+• Handles {success,data:[...]} envelope on list endpoints
+• Handles {success,data:{...fields:[...]}} on project‑detail
+• Keeps verbose logging for every request/response
 """
 
 # ── CONFIG ───────────────────────────────────────────────
@@ -20,7 +18,7 @@ CLIENT_SEC   = st.secrets["basicops_client_secret"]
 REDIRECT_URI = st.secrets["basicops_redirect_uri"]
 
 st.set_page_config("BasicOps Forms – DEBUG", layout="centered")
-st.title("📝 BasicOps Task Form (OAuth) — DEBUG")
+st.title("📝 BasicOps Task Form (OAuth) — DEBUG")
 
 # ── TOKEN HELPERS ───────────────────────────────────────
 
@@ -31,10 +29,8 @@ def save_tokens(tok: dict):
         "expires_at":    time.time() + tok.get("expires_in", 3600) - 60,
     })
 
-
 def token_valid():
     return "access_token" in st.session_state and time.time() < st.session_state.get("expires_at", 0)
-
 
 def refresh_token():
     if "refresh_token" not in st.session_state:
@@ -54,10 +50,9 @@ def refresh_token():
         return True
     return False
 
-
 def ensure_token():
     if not token_valid() and not refresh_token():
-        st.warning("Token missing or expired — click Connect")
+        st.warning("Token missing or expired — click Connect")
         st.stop()
 
 # ── API WRAPPERS WITH DEBUG ────────────────────────────
@@ -84,10 +79,15 @@ def api_post(path: str, payload: dict):
     url = f"{API_BASE}{path}"
     st.write("POST", url)
     st.write("Payload", payload)
-    r = requests.post(url, headers={
-        "Authorization": f"Bearer {st.session_state['access_token']}",
-        "Content-Type": "application/json",
-    }, data=json.dumps(payload), timeout=10)
+    r = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {st.session_state['access_token']}",
+            "Content-Type": "application/json",
+        },
+        data=json.dumps(payload),
+        timeout=10,
+    )
     st.write("Status", r.status_code)
     st.write(r.text[:300])
     if not r.ok:
@@ -95,7 +95,7 @@ def api_post(path: str, payload: dict):
         st.stop()
     return r.json()
 
-# ── HANDLE ?code= FROM OAUTH ───────────────────────────
+# ── OAUTH CODE FLOW ────────────────────────────────────
 if "code" in st.query_params and "access_token" not in st.session_state:
     code = st.query_params["code"]
     st.write("OAuth code received", code)
@@ -116,40 +116,43 @@ if "code" in st.query_params and "access_token" not in st.session_state:
         st.error("Token exchange failed — details above")
         st.stop()
 
-# ── LOGIN BUTTON IF NEEDED ─────────────────────────────
+# ── LOGIN BUTTON ───────────────────────────────────────
 if not token_valid():
     auth = f"{AUTH_URL}?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
     st.markdown(f"[🔑 Connect to BasicOps]({auth})", unsafe_allow_html=True)
     st.stop()
 
-st.success("Connected — token valid ✅")
+st.success("Connected — token valid ✅")
 
-# ── PROJECT PICKER WITH RAW DEBUG ─────────────────────
-proj_data = api_get("/project?limit=100")   # <-- list expected directly
+# ── PROJECT LIST (enveloped) ───────────────────────────
+proj_resp = api_get("/project?limit=100")
+proj_data = proj_resp.get("data", []) if isinstance(proj_resp, dict) else proj_resp
 
-st.write("🔍 Raw project list", proj_data)
+st.write("🔍 Raw project response", proj_resp)
 
 if not isinstance(proj_data, list) or not proj_data:
-    st.error("Project list came back empty or unexpected format.")
+    st.error("Project list empty or unexpected shape.")
     st.stop()
 
-proj_map = {p.get("title", f"Unnamed {i}"): p["id"] for i, p in enumerate(proj_data)}
+proj_map = {p.get("title", f"Unnamed {i}"): p["id"] for i, p in enumerate(proj_data)}
 sel_name = st.selectbox("Select a Project", list(proj_map.keys()))
-proj_id  = proj_map[sel_name]
+proj_id  = proj_map[sel_name]
 
-# ── FETCH PROJECT DETAIL & FIELDS ─────────────────────
-p_detail = api_get(f"/project/{proj_id}")
-fields   = p_detail.get("fields", [])
+# ── PROJECT DETAIL & FIELDS (enveloped) ───────────────
+proj_detail_resp = api_get(f"/project/{proj_id}")
+p_detail = proj_detail_resp.get("data", {}) if isinstance(proj_detail_resp, dict) else proj_detail_resp
+fields   = p_detail.get("fields", [])
 
+st.write("🧩 Full project detail", p_detail)
 st.write("🔍 Fields for project", fields)
 
 if not fields:
-    st.warning("No custom fields defined for this project. Only base title/description will be sent.")
+    st.warning("No custom fields found; only base title/desc will be used.")
 
-# ── BUILD DYNAMIC FORM ────────────────────────────────
+# ── DYNAMIC FORM ───────────────────────────────────────
 with st.form("task_form"):
     base_title = st.text_input("Task title")
-    base_desc  = st.text_area("Description")
+    base_desc  = st.text_area("Description")
 
     field_values = {}
     for f in fields:
@@ -170,7 +173,7 @@ with st.form("task_form"):
         elif ftype == "number":
             field_values[fid] = st.number_input(flabel, key=fid)
         else:
-            st.warning(f"Unknown field type '{ftype}' → using text input")
+            st.warning(f"Unknown field type '{ftype}' — using text input")
             field_values[fid] = st.text_input(flabel, key=fid)
 
     submitted = st.form_submit_button("Create Task")
