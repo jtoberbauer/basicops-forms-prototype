@@ -52,10 +52,14 @@ if "code" in st.query_params:
 
     st.write("Token response:", token_response.status_code, token_response.text)  # 👈 Debug line
 
-    if token_response.status_code == 200:
-        token_data = token_response.json()
-        st.session_state["access_token"] = token_data["access_token"]
-        st.experimental_rerun()
+   if token_response.status_code == 200:
+    token_data = token_response.json()
+    st.session_state["access_token"] = token_data["access_token"]
+
+    # ✅ strip ?code=… from the URL, then stop
+    st.markdown('<meta http-equiv="refresh" content="0;url=/">', unsafe_allow_html=True)
+    st.stop()
+
     else:
         st.error("Failed to authenticate with BasicOps.")
 
