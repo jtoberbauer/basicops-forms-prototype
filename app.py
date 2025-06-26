@@ -33,6 +33,33 @@ SCOPE      = "read write"
 st.set_page_config(page_title="BasicOps Forms", layout="centered")
 st.title("📝 BasicOps Task Form (OAuth)")
 
+# Handle OAuth redirect back with ?code=...
+if "code" in st.query_params:
+    code = st.query_params["code"]
+    st.write("OAuth code received:", code)  # 👈 Debug line
+
+    # Exchange code for access token
+    token_response = requests.post(
+        "https://api.basicops.com/oauth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "redirect_uri": REDIRECT_URI,
+            "grant_type": "authorization_code",
+            "code": code,
+        },
+    )
+
+    st.write("Token response:", token_response.status_code, token_response.text)  # 👈 Debug line
+
+    if token_response.status_code == 200:
+        token_data = token_response.json()
+        st.session_state["access_token"] = token_data["access_token"]
+        st.experimental_rerun()
+    else:
+        st.error("Failed to authenticate with BasicOps.")
+
+
 # ── SESSION HELPERS ──────────────────────────────────────────────────────────
 
 def save_tokens(tok_json: dict):
