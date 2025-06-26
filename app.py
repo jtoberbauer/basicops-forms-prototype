@@ -55,7 +55,7 @@ if "code" in st.query_params and "access_token" not in st.session_state:
 
         # ✨ clear ?code=… from the URL, then soft-rerun
         st.query_params.clear()      # <-- new API, not deprecated
-        st.experimental_rerun()
+        st.rerun()
     else:
         st.error(f"OAuth failed: {token_resp.text}")
         st.stop()
