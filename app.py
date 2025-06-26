@@ -56,7 +56,8 @@ if "code" in st.query_params:
         st.session_state["access_token"] = token_data["access_token"]
 
         # Strip the ?code= param by refreshing clean
-        st.markdown('<meta http-equiv="refresh" content="0;url=/">', unsafe_allow_html=True)
+        token = token_data["access_token"]
+        st.markdown(f'<meta http-equiv="refresh" content="0;url=/?token={token}">', unsafe_allow_html=True)
         st.stop()
     else:
         st.error("Failed to authenticate with BasicOps.")
