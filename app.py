@@ -2,11 +2,11 @@ import streamlit as st
 import requests, time, json, datetime
 
 """
-BasicOps Forms – **FULL DEBUG VERSION** (fixed response shapes)
---------------------------------------------------------------
-• Handles {success,data:[...]} envelope on list endpoints
-• Handles {success,data:{...fields:[...]}} on project‑detail
-• Keeps verbose logging for every request/response
+BasicOps Forms – **FULL DEBUG v2**
+---------------------------------
+• Fix NBSP typo that broke Python parsing
+• If `fields` not returned inline, call `/project/{id}/fields`
+• Keeps verbose logging and envelope handling
 """
 
 # ── CONFIG ───────────────────────────────────────────────
@@ -111,7 +111,7 @@ if "code" in st.query_params and "access_token" not in st.session_state:
     if r.ok and r.json().get("access_token"):
         save_tokens(r.json())
         st.query_params.clear()
-        st.rerun()
+        st.experimental_rerun()
     else:
         st.error("Token exchange failed — details above")
         st.stop()
@@ -136,12 +136,17 @@ if not isinstance(proj_data, list) or not proj_data:
 
 proj_map = {p.get("title", f"Unnamed {i}"): p["id"] for i, p in enumerate(proj_data)}
 sel_name = st.selectbox("Select a Project", list(proj_map.keys()))
-proj_id = proj_map[sel_name]
+proj_id = proj_map[sel_name]  # NBSP removed
 
-# ── PROJECT DETAIL & FIELDS (enveloped) ───────────────
+# ── PROJECT DETAIL & FIELD FETCH ───────────────────────
 proj_detail_resp = api_get(f"/project/{proj_id}")
 p_detail = proj_detail_resp.get("data", {}) if isinstance(proj_detail_resp, dict) else proj_detail_resp
 fields = p_detail.get("fields", [])
+
+# fallback: explicit fields endpoint if inline empty
+if not fields:
+    field_resp = api_get(f"/project/{proj_id}/fields")
+    fields = field_resp.get("data", field_resp) if isinstance(field_resp, dict) else field_resp
 
 st.write("🧩 Full project detail", p_detail)
 st.write("🔍 Fields for project", fields)
