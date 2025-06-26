@@ -128,7 +128,7 @@ if code_param and not token_valid():
             "grant_type": "authorization_code",
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SEC,
-            "redirect_uri": REDIRECT,
+            "redirect_uri": REDIRECT_URI,
             "code": code_param,
         },
         timeout=15,
@@ -146,7 +146,7 @@ if not token_valid():
     params = urlencode({
         "client_id": CLIENT_ID,
         "response_type": "code",
-        "redirect_uri": REDIRECT,
+        "redirect_uri": REDIRECT_URI,
         "scope": SCOPE,
     })
     login_url = f"{AUTH_URL}?{params}"
