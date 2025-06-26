@@ -1,124 +1,104 @@
-"""
-BasicOps Forms → Task Prototype (OAuth Version)
-------------------------------------------------
-Streamlit app that lets a user:
-1. Connect to BasicOps via OAuth 2.0
-2. Choose a project
-3. Fill out a form auto‑generated from custom project fields
-4. Submit → creates a new Task via BasicOps API
+import time
+import json
+from urllib.parse import urlencode
 
-Add these to `.streamlit/secrets.toml` **(never commit)**:
+import requests
+import streamlit as st
+
+"""
+BasicOps Forms → Task Prototype (OAuth) — **FIXED**
+--------------------------------------------------
+This version eliminates all previously‑seen crashes:
+• guards against missing `access_token` / `expires_at`
+• uses only modern `st.query_params` & `st.rerun()`
+• shows raw API errors to speed debugging
+
+Secrets required in `.streamlit/secrets.toml` (and in Streamlit Cloud > Secrets):
 
 ```
 basicops_client_id = "YOUR_CLIENT_ID"
 basicops_client_secret = "YOUR_CLIENT_SECRET"
-redirect_uri = "https://basicops-forms-prototype.streamlit.app"
+redirect_uri = "https://<your‑streamlit‑slug>.streamlit.app"
 ```
 """
-import time
-import json
-import requests
-import streamlit as st
-from urllib.parse import urlencode
-
-# ── CONFIG ────────────────────────────────────────────────────────────────────
-API_BASE   = "https://api.basicops.com/v2"
-AUTH_URL   = "https://app.basicops.com/oauth/auth"
-TOKEN_URL  = "https://api.basicops.com/oauth/token"
-CLIENT_ID  = st.secrets["basicops_client_id"]
-CLIENT_SECRET = st.secrets["basicops_client_secret"]
-REDIRECT_URI   = st.secrets["redirect_uri"]
-SCOPE      = "read write"
+# ───────────────────────── CONFIG ──────────────────────────
+API_BASE    = "https://api.basicops.com/v2"          # REST base
+AUTH_URL    = "https://app.basicops.com/oauth/auth"  # OAuth authorize
+TOKEN_URL   = "https://api.basicops.com/oauth/token" # OAuth token
+CLIENT_ID   = st.secrets["basicops_client_id"]
+CLIENT_SEC  = st.secrets["basicops_client_secret"]
+REDIRECT_URI = st.secrets["redirect_uri"]
+SCOPE       = "read write"
 
 st.set_page_config(page_title="BasicOps Forms", layout="centered")
-st.title("📝 BasicOps Task Form (OAuth)")
+st.title("📝 BasicOps Task Form (OAuth)")
 
-# ── HANDLE OAUTH REDIRECT ──────────────────────────────
-if "code" in st.query_params and "access_token" not in st.session_state:
-    code = st.query_params["code"]
-
-    token_resp = requests.post(
-        TOKEN_URL,
-        data={
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "redirect_uri": REDIRECT_URI,
-            "grant_type": "authorization_code",
-            "code": code,
-        },
-        timeout=15,
-    )
-
-    if token_resp.status_code == 200:
-       token_data = token_resp.json()
-       st.session_state["access_token"]  = token_data["access_token"]
-       st.session_state["refresh_token"] = token_data.get("refresh_token")
-       st.session_state["expires_at"]    = time.time() + token_data.get("expires_in", 3600) - 60
-
-       st.query_params.clear()
-       st.rerun()
-    else:
-        st.error(f"OAuth failed: {token_resp.text}")
-        st.stop()
-
-# ── SESSION HELPERS ──────────────────────────────────────────────────────────
+# ───────────────────── SESSION HELPERS ─────────────────────
 
 def save_tokens(tok_json: dict):
+    """Persist access / refresh tokens & expiry in session state."""
     st.session_state["access_token"]  = tok_json["access_token"]
     st.session_state["refresh_token"] = tok_json.get("refresh_token")
-    st.session_state["expires_at"]    = time.time() + tok_json.get("expires_in", 3600) - 60
+    st.session_state["expires_at"]    = time.time() + tok_json.get("expires_in", 3600) - 60  # 1‑min slack
 
 
 def token_valid() -> bool:
+    """True if we have a non‑expired access token."""
     return (
-       "access_token" in st.session_state
-       and time.time() < st.session_state.get("expires_at", 0)
+        "access_token" in st.session_state and
+        time.time() < st.session_state.get("expires_at", 0)
     )
 
 
 def refresh_token() -> bool:
+    """Attempt silent refresh with stored refresh_token."""
     if "refresh_token" not in st.session_state:
         return False
-    resp = requests.post(
+    res = requests.post(
         TOKEN_URL,
         data={
             "grant_type": "refresh_token",
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SEC,
             "refresh_token": st.session_state["refresh_token"],
-        },
-        timeout=15,
+        }, timeout=10,
     )
-    if resp.ok:
-        save_tokens(resp.json())
+    if res.ok:
+        save_tokens(res.json())
         return True
     return False
 
+# ─────────────────────── API WRAPPERS ──────────────────────
+
+def require_token():
+    if not token_valid() and not refresh_token():
+        st.error("Session expired. Please reconnect.")
+        st.stop()
+
 
 def api_get(path: str):
-    if not token_valid() and not refresh_token():
-        st.warning("Session expired, please reconnect.")
+    require_token()
+    if "access_token" not in st.session_state:
+        st.error("No access token. Click ‘Connect to BasicOps’.")
         st.stop()
-
-    url = f"{API_BASE}{path}"
-    headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
-    res = requests.get(url, headers=headers, timeout=10)
-
+    res = requests.get(
+        f"{API_BASE}{path}",
+        headers={"Authorization": f"Bearer {st.session_state['access_token']}"},
+        timeout=10,
+    )
     if not res.ok:
-        st.error(f"API error {res.status_code}: {res.text}")
+        st.error(f"API GET {path} → {res.status_code}: {res.text}")
         st.stop()
-
-    # Safely parse JSON, or show raw text for debugging
     try:
         return res.json()
     except Exception as e:
-        st.error(f"Failed to parse JSON: {e}")
-        st.write(res.text)     # show raw response to debug
+        st.error(f"Failed JSON parse: {e}")
+        st.write(res.text)
         st.stop()
 
 
-
 def api_post(path: str, payload: dict):
+    require_token()
     res = requests.post(
         f"{API_BASE}{path}",
         headers={
@@ -126,38 +106,39 @@ def api_post(path: str, payload: dict):
             "Content-Type": "application/json",
         },
         data=json.dumps(payload),
+        timeout=10,
     )
     if not res.ok:
-        st.error(f"API POST failed {res.status_code}: {res.text}")
+        st.error(f"API POST {path} → {res.status_code}: {res.text}")
         st.stop()
     return res.json()
 
-# ── HANDLE OAUTH REDIRECT ────────────────────────────────────────────────────
-code_param = st.query_params.get("code")
-if code_param and not token_valid():
-    # If query param is list, take first elem
-    if isinstance(code_param, list):
-        code_param = code_param[0]
-    token_resp = requests.post(
+# ───────────── HANDLE OAUTH REDIRECT (?code=…) ─────────────
+if "code" in st.query_params and "access_token" not in st.session_state:
+    code = st.query_params["code"]
+    res = requests.post(
         TOKEN_URL,
         data={
-            "grant_type": "authorization_code",
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SEC,
             "redirect_uri": REDIRECT_URI,
-            "code": code_param,
-        },
-        timeout=15,
+            "grant_type": "authorization_code",
+            "code": code,
+        }, timeout=10,
     )
-    if token_resp.ok:
-        save_tokens(token_resp.json())
-        # Clean URL (remove ?code)
-        st.markdown('<meta http-equiv="refresh" content="0;url=/" />', unsafe_allow_html=True)
-        st.stop()
+    if res.ok:
+        tok = res.json()
+        if not tok.get("access_token"):
+            st.error(f"Token response missing access_token → {tok}")
+            st.stop()
+        save_tokens(tok)
+        st.query_params.clear()  # drop ?code
+        st.rerun()
     else:
-        st.error("OAuth token exchange failed.")
+        st.error(f"OAuth token exchange failed: {res.status_code} {res.text}")
+        st.stop()
 
-# ── AUTH UI ──────────────────────────────────────────────────────────────────
+# ─────────────── AUTH UI (login button) ────────────────────
 if not token_valid():
     params = urlencode({
         "client_id": CLIENT_ID,
@@ -169,37 +150,41 @@ if not token_valid():
     st.markdown(f"[🔑 Connect to BasicOps]({login_url})", unsafe_allow_html=True)
     st.stop()
 
-# ── MAIN APP ─────────────────────────────────────────────────────────────────
+st.success("Connected to BasicOps ✅")
+
+# ─────────────────── MAIN APP (project → task) ─────────────
 projects = api_get("/projects?limit=100").get("items", [])
 proj_map = {p["name"]: p["id"] for p in projects}
+if not proj_map:
+    st.error("No projects returned. Check API permissions / scopes.")
+    st.stop()
 
 sel_name = st.selectbox("Select a Project", list(proj_map.keys()))
 proj_id  = proj_map[sel_name]
-proj     = api_get(f"/projects/{proj_id}")
-fields   = proj.get("fields", [])
+proj_data = api_get(f"/projects/{proj_id}")
+fields = proj_data.get("fields", [])
 
-st.subheader("Create a Task")
+st.subheader("Create Task in ‘" + sel_name + "’")
 with st.form("task_form"):
-    task_name = st.text_input("Task Name", max_chars=120)
+    task_name = st.text_input("Task name", max_chars=120)
     field_vals = {}
-
     for f in fields:
-        label, f_id, f_type = f["label"], f["id"], f["type"]
-        if f_type == "multiline":
-            field_vals[f_id] = st.text_area(label)
-        elif f_type == "select":
+        label, fid, ftype = f["label"], f["id"], f["type"]
+        if ftype == "multiline":
+            field_vals[fid] = st.text_area(label)
+        elif ftype == "select":
             opts = {o["label"]: o["value"] for o in f.get("options", [])}
             choice = st.selectbox(label, list(opts.keys())) if opts else ""
-            field_vals[f_id] = opts.get(choice, "")
-        elif f_type == "date":
+            field_vals[fid] = opts.get(choice, "")
+        elif ftype == "date":
             dt = st.date_input(label)
-            field_vals[f_id] = dt.isoformat() if dt else ""
-        elif f_type == "checkbox":
-            field_vals[f_id] = st.checkbox(label)
-        elif f_type == "number":
-            field_vals[f_id] = st.number_input(label)
+            field_vals[fid] = dt.isoformat() if dt else ""
+        elif ftype == "checkbox":
+            field_vals[fid] = st.checkbox(label)
+        elif ftype == "number":
+            field_vals[fid] = st.number_input(label)
         else:
-            field_vals[f_id] = st.text_input(label)
+            field_vals[fid] = st.text_input(label)
 
     submitted = st.form_submit_button("Create Task")
 
@@ -210,5 +195,5 @@ if submitted:
         "fields": field_vals,
     }
     new_task = api_post("/tasks", payload)
-    st.success(f"✅ Created task #{new_task['id']}")
+    st.success(f"✅ Created task #{new_task['id']} in {sel_name}")
     st.balloons()
