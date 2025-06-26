@@ -99,11 +99,23 @@ def api_get(path: str):
     if not token_valid() and not refresh_token():
         st.warning("Session expired, please reconnect.")
         st.stop()
-    res = requests.get(f"{API_BASE}{path}", headers={"Authorization": f"Bearer {st.session_state['access_token']}"})
+
+    url = f"{API_BASE}{path}"
+    headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
+    res = requests.get(url, headers=headers, timeout=10)
+
     if not res.ok:
-        st.error(f"API error {res.status_code}")
+        st.error(f"API error {res.status_code}: {res.text}")
         st.stop()
-    return res.json()
+
+    # Safely parse JSON, or show raw text for debugging
+    try:
+        return res.json()
+    except Exception as e:
+        st.error(f"Failed to parse JSON: {e}")
+        st.write(res.text)     # show raw response to debug
+        st.stop()
+
 
 
 def api_post(path: str, payload: dict):
