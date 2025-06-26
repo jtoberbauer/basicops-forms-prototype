@@ -18,7 +18,7 @@ CLIENT_SEC   = st.secrets["basicops_client_secret"]
 REDIRECT_URI = st.secrets["basicops_redirect_uri"]
 
 st.set_page_config("BasicOps Forms – DEBUG", layout="centered")
-st.title("📝 BasicOps Task Form (OAuth) — DEBUG")
+st.title("📝 BasicOps Task Form (OAuth) — DEBUG")
 
 # ── TOKEN HELPERS ───────────────────────────────────────
 
@@ -52,7 +52,7 @@ def refresh_token():
 
 def ensure_token():
     if not token_valid() and not refresh_token():
-        st.warning("Token missing or expired — click Connect")
+        st.warning("Token missing or expired — click Connect")
         st.stop()
 
 # ── API WRAPPERS WITH DEBUG ────────────────────────────
@@ -95,7 +95,7 @@ def api_post(path: str, payload: dict):
         st.stop()
     return r.json()
 
-# ── OAUTH CODE FLOW ────────────────────────────────────
+# ── OAUTH CODE FLOW ────────────────────────────────────
 if "code" in st.query_params and "access_token" not in st.session_state:
     code = st.query_params["code"]
     st.write("OAuth code received", code)
@@ -122,7 +122,7 @@ if not token_valid():
     st.markdown(f"[🔑 Connect to BasicOps]({auth})", unsafe_allow_html=True)
     st.stop()
 
-st.success("Connected — token valid ✅")
+st.success("Connected — token valid ✅")
 
 # ── PROJECT LIST (enveloped) ───────────────────────────
 proj_resp = api_get("/project?limit=100")
@@ -134,14 +134,14 @@ if not isinstance(proj_data, list) or not proj_data:
     st.error("Project list empty or unexpected shape.")
     st.stop()
 
-proj_map = {p.get("title", f"Unnamed {i}"): p["id"] for i, p in enumerate(proj_data)}
+proj_map = {p.get("title", f"Unnamed {i}"): p["id"] for i, p in enumerate(proj_data)}
 sel_name = st.selectbox("Select a Project", list(proj_map.keys()))
-proj_id  = proj_map[sel_name]
+proj_id = proj_map[sel_name]
 
 # ── PROJECT DETAIL & FIELDS (enveloped) ───────────────
 proj_detail_resp = api_get(f"/project/{proj_id}")
 p_detail = proj_detail_resp.get("data", {}) if isinstance(proj_detail_resp, dict) else proj_detail_resp
-fields   = p_detail.get("fields", [])
+fields = p_detail.get("fields", [])
 
 st.write("🧩 Full project detail", p_detail)
 st.write("🔍 Fields for project", fields)
@@ -152,7 +152,7 @@ if not fields:
 # ── DYNAMIC FORM ───────────────────────────────────────
 with st.form("task_form"):
     base_title = st.text_input("Task title")
-    base_desc  = st.text_area("Description")
+    base_desc = st.text_area("Description")
 
     field_values = {}
     for f in fields:
