@@ -26,8 +26,8 @@ API_BASE   = "https://api.basicops.com/v2"
 AUTH_URL   = "https://app.basicops.com/oauth/auth"
 TOKEN_URL  = "https://api.basicops.com/oauth/token"
 CLIENT_ID  = st.secrets["basicops_client_id"]
-CLIENT_SEC = st.secrets["basicops_client_secret"]
-REDIRECT   = st.secrets["redirect_uri"]
+CLIENT_SECRET = st.secrets["basicops_client_secret"]
+REDIRECT_URI   = st.secrets["redirect_uri"]
 SCOPE      = "read write"
 
 st.set_page_config(page_title="BasicOps Forms", layout="centered")
